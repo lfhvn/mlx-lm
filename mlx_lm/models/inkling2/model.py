@@ -71,12 +71,17 @@ class TextModel(PipelineMixin, nn.Module):
             raise ValueError("Pipeline parallel does not support looped models.")
         super().pipeline(group, split)
 
-    def _run_loop(self, hidden_states, cache, conv_mask):
+    def _run_loop(self, hidden_states, cache, conv_mask, aux=None):
         core = self.args.loop_core
         caches = iter(cache)
+        visits = iter(range(len(cache)))
 
         def run(layers, hidden_states, block_states, bank=None):
             for i, layer in enumerate(layers):
+                # The draft model reads the input (partial block) of some visits.
+                visit = next(visits)
+                if aux is not None and visit in aux:
+                    aux[visit] = hidden_states
                 messages = None if bank is None else self.message_input(bank, i)
                 hidden_states, block_states = layer(
                     hidden_states,
@@ -107,6 +112,7 @@ class TextModel(PipelineMixin, nn.Module):
         inputs: mx.array,
         cache: list[Any] | None = None,
         input_embeddings: mx.array | None = None,
+        aux: dict | None = None,
     ) -> mx.array:
         if input_embeddings is None:
             input_embeddings = self.embed(inputs)
@@ -135,7 +141,7 @@ class TextModel(PipelineMixin, nn.Module):
                 )
         else:
             hidden_states, block_states = self._run_loop(
-                hidden_states, cache, conv_mask
+                hidden_states, cache, conv_mask, aux
             )
 
         if rank != 0:
@@ -224,13 +230,18 @@ class Model(nn.Module):
         cache: list[Any] | None = None,
         input_embeddings: mx.array | None = None,
         pixel_values: mx.array | list[mx.array] | None = None,
+        aux: dict | None = None,
     ) -> mx.array:
+        """`aux` maps layer visit ids to None; the forward fills in the input
+        of each such visit and, for id `num_layer_visits`, the final hidden."""
         if pixel_values is not None:
             assert input_embeddings is None, "Pass pixel_values or input_embeddings."
             input_embeddings = self.embed_inputs(inputs, pixel_values=pixel_values)
         hidden_states = self.model.language_model(
-            inputs, cache=cache, input_embeddings=input_embeddings
+            inputs, cache=cache, input_embeddings=input_embeddings, aux=aux
         )
+        if aux is not None:
+            aux[len(self.model.language_model.layer_visits)] = hidden_states
         logits = self.lm_head(hidden_states)
         if self.sharding_group is not None:
             logits = gather_last_axis(logits, self.sharding_group)

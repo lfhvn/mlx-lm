@@ -682,6 +682,9 @@ class DecoderLayer(nn.Module):
             n = self.post_mlp_convolution.kernel_size - 1
             for i, window in enumerate(conv_states):
                 conv[i] = _conv_state(window, conv.lengths, n)
+                # Speculative decoding picks the state of the accepted prefix.
+                if getattr(conv, "windows", None) is not None:
+                    conv.windows[i] = window
             conv.advance(block_residual.shape[1])
         hidden_states = residual + hidden_states.astype(mx.float32)
         return hidden_states.astype(dtype), block_states
