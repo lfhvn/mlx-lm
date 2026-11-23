@@ -85,16 +85,3 @@ if "--dump" in sys.argv:
         res[f"B{B}"] = np.array(mx.stack(steps, 1))
     np.savez(path, **res)
     print("saved", path)
-
-if "--time" in sys.argv:
-    # GPU time per decode step of the small model (dispatch bound by design).
-    for B in (1, 4):
-        cache = make_prompt_cache(model)
-        mx.eval(model(mx.random.randint(0, 500, (B, 40)), cache=cache))
-        y = mx.random.randint(0, 500, (B, 1))
-        for _ in range(5):
-            mx.eval(model(y, cache=cache))
-        ts = []
-        for _ in range(30):
-            t0 = time.perf_counter(); mx.eval(model(y, cache=cache)); ts.append(time.perf_counter() - t0)
-        print(f"time B={B}: {sorted(ts)[15]*1e3:.2f} ms/step (median, sync)")
