@@ -54,7 +54,7 @@ def run(B, ctx, merged=False):
     return labels, sorted(builds)[4] * 1e3
 
 print(f"mlx_lm from {mlx_lm.__file__}")
-for B, merged in ((1, False), (4, False), (1, True), (4, True)):
+for B, merged in ((() if "--dump" in sys.argv else ((1, False), (4, False), (1, True), (4, True)))):
     labels, ms = run(B, 40, merged)
     total, labels = labels
     kind = "batch" if merged else "plain"
@@ -77,9 +77,10 @@ if "--dump" in sys.argv:
         prompt = mx.random.randint(0, 500, (B, 30))
         logits = model(prompt, cache=cache)[:, -1]
         steps = [logits]
-        for _ in range(24):
+        for _ in range(int(dict(a.split('=') for a in sys.argv if '=' in a).get('steps', 24))):
             y = mx.argmax(logits, axis=-1)[:, None]
             logits = model(y, cache=cache)[:, -1]
+            mx.eval(logits)
             steps.append(logits)
         res[f"B{B}"] = np.array(mx.stack(steps, 1))
     np.savez(path, **res)

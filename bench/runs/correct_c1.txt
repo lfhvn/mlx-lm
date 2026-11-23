@@ -1,0 +1,10 @@
+logits_b1_0: max abs diff 0 (logit range 57.2), argmax same 1.000
+logits_b1_1: max abs diff 0 (logit range 57.6), argmax same 1.000
+logits_b1_2: max abs diff 0 (logit range 56.7), argmax same 1.000
+tokens_b1_0: tokens identical=False, first diff at 147
+tokens_b1_1: tokens identical=True
+tokens_b1_2: tokens identical=True
+tokens_b4_0: tokens identical=True
+tokens_b4_1: tokens identical=True
+tokens_b4_2: tokens identical=True
+tokens_b4_3: tokens identical=True

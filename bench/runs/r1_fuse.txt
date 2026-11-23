@@ -1,0 +1,11 @@
+[gpulock] acquired after 1157s, memory free 55%
+mlx_lm from /private/tmp/claude-501/-Users-lhm/f1d7e6fe-edea-489b-a52e-ed9bed562c7d/scratchpad/snap_r1/mlx_lm/__init__.py
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 2560.78it/s]
+ops per decode step (B=1): 10790
+graph build per step (B=1): 10.4 ms
+ctx=short B= 1:   94.6 ms/step    10.6 tok/s total
+ctx=short B= 4:  145.4 ms/step    27.5 tok/s total
+ctx=short B= 8:  190.1 ms/step    42.1 tok/s total
+ctx=4k    B= 1:  104.4 ms/step     9.6 tok/s total
+ctx=4k    B= 4:  185.5 ms/step    21.6 tok/s total
+ctx=4k    B= 8:  257.9 ms/step    31.0 tok/s total

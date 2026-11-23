@@ -1,3 +1,11 @@
 [gpulock] acquired after 649s, memory free 56%
 mlx_lm from /Users/lhm/inkling-orchestra/engine/mlx-lm-base/mlx_lm/__init__.py
 Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 1682.63it/s]
+ops per decode step (B=1): 13510
+graph build per step (B=1): 24.2 ms
+ctx=short B= 1:  140.1 ms/step     7.1 tok/s total
+ctx=short B= 4:  178.1 ms/step    22.5 tok/s total
+ctx=short B= 8:  234.7 ms/step    34.1 tok/s total
+ctx=4k    B= 1:  109.8 ms/step     9.1 tok/s total
+ctx=4k    B= 4:  207.1 ms/step    19.3 tok/s total
+ctx=4k    B= 8:  290.6 ms/step    27.5 tok/s total
