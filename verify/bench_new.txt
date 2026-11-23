@@ -1,0 +1,11 @@
+mlx_lm from /Users/lhm/inkling-orchestra/engine/combined/mlx_lm/__init__.py
+ops per decode step (B=1): 8555
+graph build per step (B=1): 10.0 ms
+ctx=short B= 1:   60.3 ms/step    16.6 tok/s total
+ctx=short B= 4:   88.9 ms/step    45.0 tok/s total
+ctx=short B= 8:  110.9 ms/step    72.1 tok/s total
+ctx=short B=16:  221.1 ms/step    72.4 tok/s total
+ctx=4k    B= 1:   62.7 ms/step    16.0 tok/s total
+ctx=4k    B= 4:  113.5 ms/step    35.3 tok/s total
+ctx=4k    B= 8:  145.5 ms/step    55.0 tok/s total
+ctx=4k    B=16:  277.3 ms/step    57.7 tok/s total

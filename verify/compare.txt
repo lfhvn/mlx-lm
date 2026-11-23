@@ -1,0 +1,5 @@
+teacher-forced B=1: top-1 agree 793/800; max |d logprob(ref)| 4.1220; base top1-top2 margin at flips: [0.0, 0.032, 0.103, 0.108, 0.166, 0.798, 4.871]
+B=4 greedy prompt 0: first difference at token 52 of 200
+B=4 greedy prompt 1: identical
+B=4 greedy prompt 2: first difference at token 32 of 200
+B=4 greedy prompt 3: identical

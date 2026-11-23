@@ -1,0 +1,9 @@
+weights loaded: active=18.2GB cache_limit=None
+prompt tokens: 69
+  step   active    cache     peak   tok/s
+   250    0.39G    0.13G    0.93G    44.6
+   500    0.58G    0.39G    0.59G    45.7
+   750    0.76G    0.13G    0.78G    45.5
+  1000    0.91G    0.78G    0.93G    45.0
+  1250    0.94G    0.17G    0.97G    44.6
+  1500    0.95G    0.38G    1.00G    44.6
