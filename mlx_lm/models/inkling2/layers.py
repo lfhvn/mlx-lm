@@ -12,7 +12,11 @@ from mlx_lm.kernels.expert_routing import expert_routing
 from mlx_lm.layers.moe import SwitchLinear, _gather_sort, _scatter_unsort
 from mlx_lm.models.cache import BatchRotatingKVCache, RotatingKVCache
 from mlx_lm.models.inkling2.config import TextArgs
-from mlx_lm.models.inkling2.kernels import depth_attention, relative_attention
+from mlx_lm.models.inkling2.kernels import (
+    decode_attention,
+    depth_attention,
+    relative_attention,
+)
 
 __all__ = [
     "Attention",
@@ -321,25 +325,6 @@ def _attention_reference(
     return attn_output.reshape(B, Hq, L, D).transpose(0, 2, 1, 3)
 
 
-@partial(mx.compile, shapeless=True)
-def _decode_mask(
-    position_bias: mx.array,
-    query_positions: mx.array,
-    key_positions: mx.array,
-    num_rel: int,
-    window: int,
-) -> mx.array:
-    # The bias mask of a decode step, (B, H, S), for the per-row fused attention.
-    distance = query_positions - key_positions
-    index = mx.clip(distance, 0, num_rel - 1)[:, None, :]
-    bias = mx.take_along_axis(position_bias[:, 0], index, axis=-1)
-    bias = mx.where(distance[:, None] < num_rel, bias, mx.zeros_like(bias))
-    visible = (distance >= 0) & (key_positions >= 0)
-    if window:
-        visible = visible & (distance < window)
-    return mx.where(visible[:, None], bias, -mx.inf)
-
-
 class Attention(nn.Module):
     def __init__(self, args: TextArgs, *, sliding: bool):
         super().__init__()
@@ -432,37 +417,30 @@ class Attention(nn.Module):
                 key_start=key_start,
             )
 
+        if L == 1 and _use_kernels():
+            # One kernel for all rows. It gets the key positions from the cache
+            # and makes no temporaries that grow with S.
+            rotation = 0
+            if isinstance(cache, (RotatingKVCache, BatchRotatingKVCache)):
+                rotation = cache._idx
+            if isinstance(end, mx.array):
+                ends = end.astype(mx.int32)
+            else:
+                ends = mx.full((B,), end, mx.int32)
+            return decode_attention(
+                query,
+                key,
+                value,
+                position_bias,
+                sinks,
+                scale=self.scaling,
+                window=self.sliding_window,
+                ends=ends,
+                rotation=rotation,
+            )
+
         query_positions = _positions(end - L, L)
         key_positions = _key_positions(cache, S, L, end)
-        if L == 1:
-            # The fused attention takes the sinks of one row, so a batched
-            # decode step runs it once per row. The reference path below would
-            # also work, but it casts the whole key cache to float32 on every
-            # step; those S-sized temporaries grow by one token per step, so
-            # MLX's buffer cache can never reuse them and balloons by tens of
-            # GB between clears (and can exhaust Metal's buffer count).
-            query_positions = mx.broadcast_to(query_positions.reshape(-1, 1), (B, 1))
-            key_positions = mx.broadcast_to(key_positions.reshape(-1, S), (B, S))
-            R = position_bias.shape[-1]
-            masks = _decode_mask(
-                position_bias, query_positions, key_positions, R, self.sliding_window
-            ).astype(query.dtype)
-            rows = []
-            for b in range(B):
-                mask = _row(masks, b)
-                rows.append(
-                    mx.fast.scaled_dot_product_attention(
-                        query[b : b + 1],
-                        key[b : b + 1],
-                        value[b : b + 1],
-                        scale=self.scaling,
-                        mask=mask[None, :, None, :],
-                        sinks=_row(sinks[:, 0], b).astype(query.dtype),
-                    )
-                )
-            attn_output = rows[0] if B == 1 else mx.concatenate(rows, axis=0)
-            return attn_output.transpose(0, 2, 1, 3)
-
         return _attention_reference(
             query,
             key,

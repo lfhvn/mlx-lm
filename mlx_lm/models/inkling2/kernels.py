@@ -320,3 +320,208 @@ def relative_attention(
         output_shapes=[(B, L, Hq, D)],
         output_dtypes=[q.dtype],
     )[0]
+
+
+# Attention of one query per row over its cache, with a relative position bias
+# and a sink logit per row. Pass 1 gives a partial softmax for each block of
+# keys. Pass 2 merges the blocks and the sink.
+_DECODE_ATTENTION_SOURCE = """
+    constexpr float LOG2E = 1.4426950408889634f;
+    constexpr int G = HQ / HKV;
+    constexpr int E = D / 32;
+    constexpr int NSG = TG / 32;
+    const int S = sizes[0];
+    const int rot = sizes[1];
+    const int splits = sizes[2];
+    const uint lane = thread_index_in_simdgroup;
+    const uint sg = simdgroup_index_in_threadgroup;
+    const int split = threadgroup_position_in_grid.x;
+    const int kv_head = threadgroup_position_in_grid.y;
+    const int batch = threadgroup_position_in_grid.z;
+    const int chunk = (S + splits - 1) / splits;
+    const int lo = split * chunk;
+    const int hi = min(S, lo + chunk);
+    const int end = ends[batch];
+    const int base = end - S;
+    const float qscale = scale * LOG2E;
+
+    float qv[G][E];
+    float acc[G][E];
+    float m[G];
+    float l[G];
+    for (int g = 0; g < G; ++g) {
+        const device T* qp = q + batch * q_strides[0]
+            + (kv_head * G + g) * q_strides[1] + lane * E;
+        for (int e = 0; e < E; ++e) {
+            qv[g][e] = float(qp[e]) * qscale;
+            acc[g][e] = 0.0f;
+        }
+        m[g] = -INFINITY;
+        l[g] = 0.0f;
+    }
+    const device T* k_head = k + batch * k_strides[0] + kv_head * k_strides[1];
+    const device T* v_head = v + batch * v_strides[0] + kv_head * v_strides[1];
+    const device T* bias = rel + size_t(batch * HQ + kv_head * G) * R;
+
+    for (int j = lo + int(sg); j < hi; j += NSG) {
+        // Slot j holds the key at this position. A ring cache is rotated.
+        const int pos = base + (j - rot + S) % S;
+        const int d = end - 1 - pos;
+        if (pos < 0 || d < 0 || (WINDOW > 0 && d >= WINDOW)) {
+            continue;
+        }
+        const device T* kp = k_head + j * k_strides[2] + lane * E;
+        const device T* vp = v_head + j * v_strides[2] + lane * E;
+        float kk[E];
+        float vv[E];
+        for (int e = 0; e < E; ++e) {
+            kk[e] = float(kp[e]);
+            vv[e] = float(vp[e]);
+        }
+        for (int g = 0; g < G; ++g) {
+            float s = 0.0f;
+            for (int e = 0; e < E; ++e) {
+                s += qv[g][e] * kk[e];
+            }
+            s = simd_sum(s);
+            if (d < R) {
+                s += float(bias[g * R + d]) * LOG2E;
+            }
+            const float new_m = max(m[g], s);
+            const float f = fast::exp2(m[g] - new_m);
+            const float p = fast::exp2(s - new_m);
+            l[g] = l[g] * f + p;
+            for (int e = 0; e < E; ++e) {
+                acc[g][e] = acc[g][e] * f + p * vv[e];
+            }
+            m[g] = new_m;
+        }
+    }
+
+    threadgroup float sm[NSG * G];
+    threadgroup float sl[NSG * G];
+    threadgroup float sacc[NSG * G * D];
+    for (int g = 0; g < G; ++g) {
+        if (lane == 0) {
+            sm[sg * G + g] = m[g];
+            sl[sg * G + g] = l[g];
+        }
+        for (int e = 0; e < E; ++e) {
+            sacc[(sg * G + g) * D + lane * E + e] = acc[g][e];
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    const uint tid = thread_position_in_threadgroup.x;
+    for (uint i = tid; i < G * D; i += TG) {
+        const int g = i / D;
+        const int c = i % D;
+        float mm = -INFINITY;
+        for (int s = 0; s < NSG; ++s) {
+            mm = max(mm, sm[s * G + g]);
+        }
+        float ll = 0.0f;
+        float aa = 0.0f;
+        if (mm > -INFINITY) {
+            for (int s = 0; s < NSG; ++s) {
+                const float w = fast::exp2(sm[s * G + g] - mm);
+                ll += sl[s * G + g] * w;
+                aa += sacc[(s * G + g) * D + c] * w;
+            }
+        }
+        const size_t row = size_t(batch * HQ + kv_head * G + g) * splits + split;
+        part_acc[row * D + c] = aa;
+        if (c == 0) {
+            part_max[row] = mm;
+            part_sum[row] = ll;
+        }
+    }
+"""
+
+_DECODE_MERGE_SOURCE = """
+    constexpr float LOG2E = 1.4426950408889634f;
+    const int splits = sizes[2];
+    const int row = threadgroup_position_in_grid.y;
+    const int c = thread_position_in_threadgroup.x;
+    float mm = float(sinks[row]) * LOG2E;
+    for (int s = 0; s < splits; ++s) {
+        mm = max(mm, part_max[row * splits + s]);
+    }
+    float ll = fast::exp2(float(sinks[row]) * LOG2E - mm);
+    float aa = 0.0f;
+    for (int s = 0; s < splits; ++s) {
+        const float w = fast::exp2(part_max[row * splits + s] - mm);
+        ll += part_sum[row * splits + s] * w;
+        aa += part_acc[(row * splits + s) * D + c] * w;
+    }
+    out[row * D + c] = T(aa / ll);
+"""
+
+_decode_attention_kernel = mx.fast.metal_kernel(
+    name="inkling_decode_attention",
+    input_names=["q", "k", "v", "rel", "ends", "sizes", "scale"],
+    output_names=["part_max", "part_sum", "part_acc"],
+    source=_DECODE_ATTENTION_SOURCE,
+    ensure_row_contiguous=False,
+)
+
+_decode_merge_kernel = mx.fast.metal_kernel(
+    name="inkling_decode_merge",
+    input_names=["part_max", "part_sum", "part_acc", "sinks", "sizes"],
+    output_names=["out"],
+    source=_DECODE_MERGE_SOURCE,
+)
+
+_DECODE_TG = 256
+
+
+def _decode_splits(B: int, Hkv: int, S: int) -> int:
+    # Enough threadgroups to fill the GPU, at least 128 keys in each.
+    want = max(1, 256 // (B * Hkv))
+    return max(1, min(want, (S + 127) // 128))
+
+
+def decode_attention(
+    q: mx.array,
+    k: mx.array,
+    v: mx.array,
+    rel: mx.array,
+    sinks: mx.array,
+    *,
+    scale: float,
+    window: int,
+    ends: mx.array,
+    rotation: int,
+) -> mx.array:
+    """q: (B, Hq, 1, D), k and v: (B, Hkv, S, D). rel: (B, 1, Hq, R), the bias
+    at distances below R. sinks: (B, 1, Hq). ends: (B,), the position after the
+    query. Slot j of the keys holds position ends - S + (j - rotation) % S.
+    Returns (B, 1, Hq, D)."""
+    B, Hq, _, D = q.shape
+    Hkv, S = k.shape[1], k.shape[2]
+    splits = _decode_splits(B, Hkv, S)
+    sizes = mx.array([S, rotation, splits], dtype=mx.int32)
+    part_max, part_sum, part_acc = _decode_attention_kernel(
+        inputs=[q, k, v, mx.contiguous(rel), ends, sizes, scalar(scale)],
+        template=[
+            ("T", q.dtype),
+            ("D", D),
+            ("HQ", Hq),
+            ("HKV", Hkv),
+            ("R", rel.shape[-1]),
+            ("WINDOW", window),
+            ("TG", _DECODE_TG),
+        ],
+        grid=(splits * _DECODE_TG, Hkv, B),
+        threadgroup=(_DECODE_TG, 1, 1),
+        output_shapes=[(B, Hq, splits), (B, Hq, splits), (B, Hq, splits, D)],
+        output_dtypes=[mx.float32, mx.float32, mx.float32],
+    )
+    return _decode_merge_kernel(
+        inputs=[part_max, part_sum, part_acc, mx.contiguous(sinks), sizes],
+        template=[("T", q.dtype), ("D", D)],
+        grid=(D, B * Hq, 1),
+        threadgroup=(D, 1, 1),
+        output_shapes=[(B, 1, Hq, D)],
+        output_dtypes=[q.dtype],
+    )[0]
