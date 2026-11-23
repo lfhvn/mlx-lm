@@ -247,18 +247,34 @@ class DynamicShortConvolution(nn.Module):
         return out.astype(hidden_states.dtype), window
 
 
+_ARANGES: dict = {}
+
+
+def _arange(n: int, shift: int = 0) -> mx.array:
+    # (arange(n) - shift) % n. All layers use the same ones in a step, so
+    # keep a few instead of making them again in each layer.
+    key = (n, shift)
+    if key not in _ARANGES:
+        if len(_ARANGES) >= 16:
+            _ARANGES.pop(next(iter(_ARANGES)))
+        k = mx.arange(n)
+        _ARANGES[key] = (k - shift) % n if shift else k
+    return _ARANGES[key]
+
+
 def _positions(offset, length: int) -> mx.array:
-    pos = mx.arange(length)
+    pos = _arange(length)
     if isinstance(offset, mx.array):
         return offset[:, None] + pos
     return pos + offset
 
 
 def _key_positions(cache: Any, num_keys: int, num_queries: int, end) -> mx.array:
-    k = mx.arange(num_keys)
+    shift = 0
     if num_queries == 1 and isinstance(cache, (RotatingKVCache, BatchRotatingKVCache)):
         # A decode step writes in place, so the keys can be rotated.
-        k = (k - cache._idx) % num_keys
+        shift = cache._idx % num_keys
+    k = _arange(num_keys, shift)
     if isinstance(end, mx.array):
         return (end - num_keys)[:, None] + k
     return k + (end - num_keys)
