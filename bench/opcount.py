@@ -43,9 +43,9 @@ def run(B, ctx, merged=False):
     for _ in range(3):
         mx.eval(model(y, cache=cache))
     out = model(y, cache=cache)
-    mx.export_to_dot("/tmp/fuse_opcount.dot", out)
+    mx.export_to_dot(f"/tmp/fuse_opcount_{int(merged)}{B}.dot", out)
     mx.eval(out)
-    lines = [l for l in open("/tmp/fuse_opcount.dot") if "label" in l and "->" not in l]
+    lines = [l for l in open(f"/tmp/fuse_opcount_{int(merged)}{B}.dot") if "label" in l and "->" not in l]
     labels = [re.search(r'label\s*=\s*"([^"]*)"', l).group(1) for l in lines if "rectangle" in l]
     labels = (len(lines), labels)
     builds = []
@@ -55,13 +55,14 @@ def run(B, ctx, merged=False):
 
 print(f"mlx_lm from {mlx_lm.__file__}")
 for B, merged in ((1, False), (4, False), (1, True), (4, True)):
-    if merged and "-v" in sys.argv:
-        break
     labels, ms = run(B, 40, merged)
     total, labels = labels
     kind = "batch" if merged else "plain"
-    print(f"{kind} B={B}: nodes={total}  build={ms:.1f} ms")
-    if B == 1 and "-v" in sys.argv:
+    views = {"Broadcast", "BroadcastAxes", "Reshape", "Transpose", "Slice", "Squeeze",
+             "ExpandDims", "Flatten", "Unflatten", "Split", "StopGradient", "Depends", "AsStrided"}
+    kernels = sum(1 for l in labels if l not in views)
+    print(f"{kind} B={B}: nodes={total}  non-view ops={kernels}  build={ms:.1f} ms")
+    if B == 1 and merged and "-v" in sys.argv:
         for k, v in collections.Counter(re.sub(r"\d+$", "", l) for l in labels).most_common(40):
             print(f"   {v:6d} {k}")
 

@@ -44,6 +44,11 @@ def _use_kernels() -> bool:
     return mx.default_device() == mx.gpu and mx.metal.is_available()
 
 
+def _row(x: mx.array, i: int) -> mx.array:
+    # x[i] makes a gather (a copy); a slice is a view.
+    return x[i : i + 1].squeeze(0)
+
+
 def unweighted_rms_norm(x: mx.array, eps: float = 1e-6) -> mx.array:
     return mx.fast.rms_norm(x, None, eps)
 
@@ -448,7 +453,7 @@ class Attention(nn.Module):
             ).astype(query.dtype)
             rows = []
             for b in range(B):
-                mask = masks[b]
+                mask = _row(masks, b)
                 rows.append(
                     mx.fast.scaled_dot_product_attention(
                         query[b : b + 1],
@@ -456,7 +461,7 @@ class Attention(nn.Module):
                         value[b : b + 1],
                         scale=self.scaling,
                         mask=mask[None, :, None, :],
-                        sinks=sinks[b, 0].astype(query.dtype),
+                        sinks=_row(sinks[:, 0], b).astype(query.dtype),
                     )
                 )
             attn_output = rows[0] if B == 1 else mx.concatenate(rows, axis=0)
@@ -728,9 +733,9 @@ class _StackedGates:
             )
             dims = gates[0].forget_gate_proj.weight.shape[0]
             for i, g in enumerate(gates):
-                g.down_proj.weight = self.down[i]
-                g.forget_gate_proj.weight = self.gates[i, :dims]
-                g.message_gate_proj.weight = self.gates[i, dims:]
+                g.down_proj.weight = _row(self.down, i)
+                g.forget_gate_proj.weight = _row(self.gates, i)[:dims]
+                g.message_gate_proj.weight = _row(self.gates, i)[dims:]
             self.sources = tuple(l.weight for l in linears)
         return self.down, self.gates
 
@@ -753,7 +758,7 @@ def _batched_message_gates(states: tuple, messages: mx.array, down, gates) -> tu
     x = x.astype(mx.float32) @ gates.swapaxes(-1, -2)
     forget, gate = mx.split(x[:, :, None], 2, axis=-1)
     out = _message_mix(hidden_states, message, forget, gate)
-    return tuple(out[i] for i in range(n))
+    return tuple(_row(out, i) for i in range(n))
 
 
 class MessageInput(nn.Module):
@@ -763,7 +768,7 @@ class MessageInput(nn.Module):
         self.query = mx.zeros((num_looped_layers, 4, dims), mx.float32)
 
     def __call__(self, bank: tuple, loop_layer_idx: int) -> mx.array:
-        return _depth_attention(*bank, self.query[loop_layer_idx])
+        return _depth_attention(*bank, _row(self.query, loop_layer_idx))
 
 
 class DecoderLayer(nn.Module):
