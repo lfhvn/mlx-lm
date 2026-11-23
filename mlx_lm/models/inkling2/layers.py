@@ -698,6 +698,64 @@ class MessageGate(nn.Module):
         return _message_mix(hidden_states, message, forget, gate)
 
 
+class _StackedGates:
+    """The weights of some message gates stacked, so one batched matmul runs
+    them all. The gates then use views of the stacked weights."""
+
+    def __init__(self):
+        self.sources, self.down, self.gates = (), None, None
+
+    def __call__(self, gates) -> tuple | None:
+        linears = [
+            l
+            for g in gates
+            for l in (g.down_proj, g.forget_gate_proj, g.message_gate_proj)
+        ]
+        if not all(type(l) is nn.Linear and "bias" not in l for l in linears):
+            return None
+        sources = tuple(l.weight for l in linears)
+        if len(sources) != len(self.sources) or any(
+            a is not b for a, b in zip(sources, self.sources)
+        ):
+            self.down = mx.stack([g.down_proj.weight for g in gates])
+            self.gates = mx.stack(
+                [
+                    mx.concatenate(
+                        [g.forget_gate_proj.weight, g.message_gate_proj.weight]
+                    )
+                    for g in gates
+                ]
+            )
+            dims = gates[0].forget_gate_proj.weight.shape[0]
+            for i, g in enumerate(gates):
+                g.down_proj.weight = self.down[i]
+                g.forget_gate_proj.weight = self.gates[i, :dims]
+                g.message_gate_proj.weight = self.gates[i, dims:]
+            self.sources = tuple(l.weight for l in linears)
+        return self.down, self.gates
+
+
+def _batched_message_gates(states: tuple, messages: mx.array, down, gates) -> tuple:
+    """MessageGate for each of the states at once, for one decode step.
+    messages: (B, 1, N, D), the message of state i at index i."""
+    n = len(states)
+    B, _, _, D = messages.shape
+    if all(x is states[0] for x in states):
+        hidden_states = mx.broadcast_to(states[0], (n, *states[0].shape))
+        normed = mx.broadcast_to(unweighted_rms_norm(states[0]), hidden_states.shape)
+    else:
+        hidden_states = mx.stack(states)
+        normed = unweighted_rms_norm(hidden_states)
+    message = mx.moveaxis(messages, -2, 0)[:n]
+    normed_message = mx.moveaxis(unweighted_rms_norm(messages), -2, 0)[:n]
+    x = mx.concatenate([normed, normed_message], axis=-1).astype(down.dtype)
+    x = x.reshape(n, B, 2 * D) @ down.swapaxes(-1, -2)
+    x = x.astype(mx.float32) @ gates.swapaxes(-1, -2)
+    forget, gate = mx.split(x[:, :, None], 2, axis=-1)
+    out = _message_mix(hidden_states, message, forget, gate)
+    return tuple(out[i] for i in range(n))
+
+
 class MessageInput(nn.Module):
     def __init__(self, dims: int, num_looped_layers: int):
         super().__init__()
@@ -728,8 +786,14 @@ class DecoderLayer(nn.Module):
             self.k_message_gate = MessageGate(dims, rank)
             self.v_message_gate = MessageGate(dims, rank)
             self.mlp_message_gate = MessageGate(dims, rank)
+            self._stacked_gates = _StackedGates()
 
     def _mix_messages(self, states: tuple, messages: mx.array) -> tuple:
+        gates = (self.q_message_gate, self.k_message_gate, self.v_message_gate)
+        if messages.shape[1] == 1:
+            weights = self._stacked_gates(gates)
+            if weights is not None:
+                return _batched_message_gates(states, messages, *weights)
         q_states, k_states, v_states = states
         return (
             self.q_message_gate(q_states, messages[..., 0, :]),

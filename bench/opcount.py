@@ -26,10 +26,19 @@ nn.quantize(model, group_size=16, bits=4, mode="nvfp4",
             class_predicate=lambda p, m: ".experts." in p and hasattr(m, "to_quantized"))
 mx.eval(model.parameters())
 
-def run(B, ctx):
-    cache = make_prompt_cache(model)
+def run(B, ctx, merged=False):
     prompt = mx.random.randint(0, 500, (B, ctx))
-    mx.eval(model(prompt, cache=cache))
+    if merged:
+        # The batch caches of BatchGenerator, as the server uses.
+        from mlx_lm.generate import _merge_caches
+        caches = []
+        for b in range(B):
+            caches.append(make_prompt_cache(model))
+            mx.eval(model(prompt[b : b + 1], cache=caches[-1]))
+        cache = _merge_caches(caches)
+    else:
+        cache = make_prompt_cache(model)
+        mx.eval(model(prompt, cache=cache))
     y = mx.random.randint(0, 500, (B, 1))
     for _ in range(3):
         mx.eval(model(y, cache=cache))
@@ -45,10 +54,13 @@ def run(B, ctx):
     return labels, sorted(builds)[4] * 1e3
 
 print(f"mlx_lm from {mlx_lm.__file__}")
-for B in (1, 4):
-    labels, ms = run(B, 40)
+for B, merged in ((1, False), (4, False), (1, True), (4, True)):
+    if merged and "-v" in sys.argv:
+        break
+    labels, ms = run(B, 40, merged)
     total, labels = labels
-    print(f"B={B}: nodes={total} prims={len(labels)}  build={ms:.1f} ms")
+    kind = "batch" if merged else "plain"
+    print(f"{kind} B={B}: nodes={total}  build={ms:.1f} ms")
     if B == 1 and "-v" in sys.argv:
         for k, v in collections.Counter(re.sub(r"\d+$", "", l) for l in labels).most_common(40):
             print(f"   {v:6d} {k}")
