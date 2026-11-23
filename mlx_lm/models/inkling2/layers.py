@@ -57,6 +57,18 @@ def _l2_clip(hidden_states: mx.array, scale: mx.array, threshold: float) -> mx.a
 
 
 @partial(mx.compile, shapeless=True)
+def _l2_clip_tau(
+    hidden_states: mx.array, scale: mx.array, threshold: float, tau: mx.array
+) -> mx.array:
+    # Same as _l2_clip then the tau scaling, with the same roundings.
+    dtype = hidden_states.dtype
+    states = hidden_states.astype(mx.float32) * scale
+    norm = mx.sqrt((states * states).sum(axis=-1, keepdims=True))
+    scaled = (states * mx.minimum(threshold / (norm + 1e-6), 1.0)).astype(dtype)
+    return (scaled.astype(mx.float32) * tau).astype(dtype)
+
+
+@partial(mx.compile, shapeless=True)
 def _softcapped_swiglu(
     gate: mx.array, up: mx.array, gate_softcap: float, up_softcap: float
 ) -> mx.array:
@@ -65,6 +77,36 @@ def _softcapped_swiglu(
     gate_capped = mx.tanh(gate / gate_softcap) * gate_softcap
     up_capped = mx.tanh(up / up_softcap) * up_softcap
     return (gate_capped * mx.sigmoid(gate) * up_capped).astype(input_dtype)
+
+
+@partial(mx.compile, shapeless=True)
+def _output_gate(attn_output: mx.array, gate: mx.array) -> mx.array:
+    out = attn_output.astype(mx.float32) * mx.sigmoid(gate.astype(mx.float32))
+    return out.astype(gate.dtype)
+
+
+@partial(mx.compile, shapeless=True)
+def _conv_residual(out: mx.array, hidden_states: mx.array, divisor: float) -> mx.array:
+    out = (out.astype(mx.float32) + hidden_states.astype(mx.float32)) / divisor
+    return out.astype(hidden_states.dtype)
+
+
+@partial(mx.compile, shapeless=True)
+def _message_mix(
+    hidden_states: mx.array, message: mx.array, forget: mx.array, gate: mx.array
+) -> mx.array:
+    return (1 - mx.tanh(forget)) * hidden_states + mx.tanh(gate) * message
+
+
+@partial(mx.compile, shapeless=True)
+def _f32_add(a: mx.array, b: mx.array) -> mx.array:
+    return a.astype(mx.float32) + b.astype(mx.float32)
+
+
+@partial(mx.compile, shapeless=True)
+def _weighted_sum(states: mx.array, weights: mx.array) -> mx.array:
+    out = (states.astype(mx.float32) * weights[..., None]).sum(axis=-2)
+    return out.astype(states.dtype)
 
 
 class L2Clip(nn.Module):
@@ -82,7 +124,9 @@ class ScaledL2Clip(nn.Module):
         self.threshold = threshold
         self.scale = mx.ones((num_heads, head_dim))
 
-    def __call__(self, hidden_states: mx.array) -> mx.array:
+    def __call__(self, hidden_states: mx.array, tau: mx.array | None = None) -> mx.array:
+        if tau is not None:
+            return _l2_clip_tau(hidden_states, self.scale, self.threshold, tau)
         return _l2_clip(hidden_states, self.scale, self.threshold)
 
 
@@ -111,6 +155,9 @@ def _conv_input(
 
 def _conv_state(window: mx.array, lengths: mx.array | None, n: int) -> mx.array:
     if lengths is None:
+        if window.shape[1] == n + 1:
+            # A decode step: the window is small, so a view is enough.
+            return window[:, 1:]
         pos = mx.arange(window.shape[1] - n, window.shape[1])[None, :, None]
     else:
         ends = mx.clip(lengths, 0, window.shape[1] - n)
@@ -132,12 +179,10 @@ class ShortConvolution(nn.Module):
         conv_mask: mx.array | None,
     ) -> tuple[mx.array, mx.array]:
         K = self.kernel_size
-        residual = hidden_states.astype(mx.float32)
         window = _conv_input(hidden_states, conv_state, conv_mask, K)
         # As the reference, the conv runs in the weight dtype.
         out = self.conv1d(window.astype(self.conv1d.weight.dtype))
-        out = (out.astype(mx.float32) + residual) / math.sqrt(K + 1)
-        return out.astype(hidden_states.dtype), window
+        return _conv_residual(out, hidden_states, math.sqrt(K + 1)), window
 
 
 class DynamicShortConvolution(nn.Module):
@@ -228,6 +273,25 @@ def _attention_reference(
     return attn_output.reshape(B, Hq, L, D).transpose(0, 2, 1, 3)
 
 
+@partial(mx.compile, shapeless=True)
+def _decode_mask(
+    position_bias: mx.array,
+    query_positions: mx.array,
+    key_positions: mx.array,
+    num_rel: int,
+    window: int,
+) -> mx.array:
+    # The bias mask of a decode step, (B, H, S), for the per-row fused attention.
+    distance = query_positions - key_positions
+    index = mx.clip(distance, 0, num_rel - 1)[:, None, :]
+    bias = mx.take_along_axis(position_bias[:, 0], index, axis=-1)
+    bias = mx.where(distance[:, None] < num_rel, bias, mx.zeros_like(bias))
+    visible = (distance >= 0) & (key_positions >= 0)
+    if window:
+        visible = visible & (distance < window)
+    return mx.where(visible[:, None], bias, -mx.inf)
+
+
 class Attention(nn.Module):
     def __init__(self, args: TextArgs, *, sliding: bool):
         super().__init__()
@@ -283,19 +347,12 @@ class Attention(nn.Module):
         key_states = key_states.reshape(B, L, self.num_key_value_heads, -1)
         value_states = value_states.reshape(B, L, self.num_key_value_heads, -1)
         relative_states = relative_states.reshape(B, L, self.num_heads, -1)
-        query_states = self.q_l2_clip(query_states)
+        query_states = self.q_l2_clip(query_states, tau)
         key_states = self.k_l2_clip(key_states)
         value_states = unweighted_rms_norm(
             value_states.astype(mx.float32), self.eps
         ).astype(value_states.dtype)
-        relative_states = self.rel_l2_clip(relative_states)
-        if tau is not None:
-            query_states = (query_states.astype(mx.float32) * tau).astype(
-                query_states.dtype
-            )
-            relative_states = (relative_states.astype(mx.float32) * tau).astype(
-                relative_states.dtype
-            )
+        relative_states = self.rel_l2_clip(relative_states, tau)
         position_bias = self.rel_logits_proj(relative_states)
 
         query_states = query_states.transpose(0, 2, 1, 3)
@@ -307,9 +364,8 @@ class Attention(nn.Module):
             query_states, key_states, value_states, position_bias, sinks, cache
         )
 
-        attn_output = attn_output.reshape(B, L, -1).astype(mx.float32)
-        attn_output = attn_output * mx.sigmoid(gate.astype(mx.float32))
-        return self.o_proj(attn_output.astype(gate.dtype))
+        attn_output = _output_gate(attn_output.reshape(B, L, -1), gate)
+        return self.o_proj(attn_output)
 
     def _attention(self, query, key, value, position_bias, sinks, cache) -> mx.array:
         B, _, L, _ = query.shape
@@ -341,15 +397,12 @@ class Attention(nn.Module):
             query_positions = mx.broadcast_to(query_positions.reshape(-1, 1), (B, 1))
             key_positions = mx.broadcast_to(key_positions.reshape(-1, S), (B, S))
             R = position_bias.shape[-1]
+            masks = _decode_mask(
+                position_bias, query_positions, key_positions, R, self.sliding_window
+            ).astype(query.dtype)
             rows = []
             for b in range(B):
-                distance = query_positions[b] - key_positions[b]
-                bias = mx.take(position_bias[b, 0], mx.clip(distance, 0, R - 1), axis=-1)
-                bias = mx.where(distance < R, bias, mx.zeros_like(bias))
-                visible = (distance >= 0) & (key_positions[b] >= 0)
-                if self.sliding_window:
-                    visible = visible & (distance < self.sliding_window)
-                mask = mx.where(visible, bias, -mx.inf).astype(query.dtype)
+                mask = masks[b]
                 rows.append(
                     mx.fast.scaled_dot_product_attention(
                         query[b : b + 1],
@@ -537,6 +590,8 @@ class SparseMoeBlock(nn.Module):
             hidden_states = sum_gradients(group)(hidden_states)
         selected_experts, routing_weights = self.gate(hidden_states)
         expert_states = self.experts(hidden_states, selected_experts)
+        if group is None:
+            return _weighted_sum(expert_states, routing_weights)
         expert_states = expert_states.astype(mx.float32) * routing_weights[..., None]
         final_hidden_states = expert_states.sum(axis=-2)
         if group is not None:
@@ -588,9 +643,12 @@ class MessageGate(nn.Module):
         )
         states = self.down_proj(states.astype(self.down_proj.weight.dtype))
         states = states.astype(mx.float32)
-        forget_gate = mx.tanh(self.forget_gate_proj(states))
-        message_gate = mx.tanh(self.message_gate_proj(states))
-        return (1 - forget_gate) * hidden_states + message_gate * message
+        return _message_mix(
+            hidden_states,
+            message,
+            self.forget_gate_proj(states),
+            self.message_gate_proj(states),
+        )
 
 
 class MessageInput(nn.Module):
@@ -665,7 +723,7 @@ class DecoderLayer(nn.Module):
             else:
                 block_states = mx.concatenate([block_states, block])
         else:
-            residual = hidden_states = block_residual.astype(mx.float32) + hidden_states
+            residual = hidden_states = _f32_add(block_residual, hidden_states)
 
         normed_states = unweighted_rms_norm(hidden_states)
         hidden_states = self.mlp_input(block_states, normed_states)[..., 0, :]
@@ -683,8 +741,7 @@ class DecoderLayer(nn.Module):
             for i, window in enumerate(conv_states):
                 conv[i] = _conv_state(window, conv.lengths, n)
             conv.advance(block_residual.shape[1])
-        hidden_states = residual + hidden_states.astype(mx.float32)
-        return hidden_states.astype(dtype), block_states
+        return _f32_add(residual, hidden_states).astype(dtype), block_states
 
 
 class SlidingDecoderLayer(DecoderLayer):
