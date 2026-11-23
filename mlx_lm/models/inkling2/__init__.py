@@ -12,3 +12,9 @@ __all__ = [
     "Model",
     "ModelArgs",
 ]
+
+# Local patch: response format and tool parser for checkpoints without them.
+TOKENIZER_DEFAULTS = {
+    "chat_template_type": "inkling2",
+    "tool_parser_type": "inkling2",
+}
