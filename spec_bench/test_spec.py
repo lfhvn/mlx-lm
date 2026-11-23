@@ -56,10 +56,10 @@ class TestSpec(unittest.TestCase):
             prompt = mx.random.randint(0, UNPADDED_VOCAB, (prompt_len,)).tolist()
             base, _ = greedy_generate(model, prompt, 60)
             for p_wrong in (0.0, 0.15, 0.5, 1.0):
-                draft = FakeDraft(prompt + base, nv, p_wrong, seed=prompt_len)
-                stats = {}
-                spec, _ = speculative_generate(model, draft, prompt, 60, stats=stats)
-                self.assertEqual(spec, base, f"prompt {prompt_len} p_wrong {p_wrong}")
+                for nd in (1, 3, 7):
+                    draft = FakeDraft(prompt + base, nv, p_wrong, seed=prompt_len)
+                    spec, _ = speculative_generate(model, draft, prompt, 60, num_draft=nd)
+                    self.assertEqual(spec, base, f"prompt {prompt_len} p {p_wrong} nd {nd}")
 
     def test_aux_does_not_change_logits(self):
         model = create_model(config=LOOP_CONFIG)

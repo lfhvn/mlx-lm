@@ -115,11 +115,17 @@ def greedy_generate(model, prompt, max_tokens, eos=()):
     return out, time.perf_counter() - t0
 
 
-def speculative_generate(model, draft, prompt, max_tokens, eos=(), stats=None):
+def speculative_generate(
+    model, draft, prompt, max_tokens, eos=(), stats=None, num_draft=None
+):
     """B=1 greedy speculative decode. Output tokens equal greedy decoding of
-    the target, up to numerics of the 8-token verify forward."""
+    the target, up to numerics of the multi-token verify forward.
+
+    `num_draft` (at most `block_size - 1`) drafts are verified per round."""
     aux_ids = draft.args.target_layer_ids
-    block = draft.args.block_size
+    num_draft = num_draft or draft.args.block_size - 1
+    assert 1 <= num_draft < draft.args.block_size
+    block = num_draft + 1
     cache = make_spec_cache(model)
     draft.reset()
     logits, feats = prefill(model, prompt, cache, aux_ids)
@@ -132,7 +138,7 @@ def speculative_generate(model, draft, prompt, max_tokens, eos=(), stats=None):
     accepted = []
     t0 = time.perf_counter()
     while len(out) < max_tokens and out[-1] not in eos:
-        drafts = draft.draft(y, pos, last)  # (1, block - 1)
+        drafts = draft.draft(y, pos, last)[:, :num_draft]
         tokens = mx.concatenate([y.reshape(1, 1), drafts], axis=1)
         logits, feats = _forward(model, tokens, cache, aux_ids)
         target = mx.argmax(logits[0], axis=-1)

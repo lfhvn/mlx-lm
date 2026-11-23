@@ -36,6 +36,7 @@ ap.add_argument("--max-tokens", type=int, default=256)
 ap.add_argument("--n", type=int, default=len(QUESTIONS))
 ap.add_argument("--effort", default="low")
 ap.add_argument("--out", default=None)
+ap.add_argument("--num-draft", default="7", help="spec: comma list, e.g. 3,7")
 ap.add_argument("--variants", default="ref", help="offline: ref,shift,nomarkov")
 args = ap.parse_args()
 
@@ -93,25 +94,29 @@ for i, prompt in enumerate(prompts):
         greedy_generate(model, prompt, 16, eos)  # warm up
         speculative_generate(model, draft, prompt, 16, eos)
         base, t_base = greedy_generate(model, prompt, args.max_tokens, eos)
-        stats = {}
-        spec, t_spec = speculative_generate(model, draft, prompt, args.max_tokens, eos, stats)
-        prefix = next((k for k, (a, b) in enumerate(zip(base, spec)) if a != b), min(len(base), len(spec)))
-        acc = stats["accepted"]
-        r = {
-            "q": QUESTIONS[i], "identical": base == spec, "first_diff": prefix,
-            "n_base": len(base), "n_spec": len(spec),
-            "base_tok_s": (len(base) - 1) / t_base, "spec_tok_s": (len(spec) - 1) / t_spec,
-            "mean_accepted": statistics.mean(acc), "rounds": len(acc),
-            "base": base, "spec": spec,
-        }
-        print(f"[{i}] identical={r['identical']} first_diff={prefix}/{len(base)} "
-              f"base {r['base_tok_s']:.1f} tok/s  spec {r['spec_tok_s']:.1f} tok/s "
-              f"(x{r['spec_tok_s'] / r['base_tok_s']:.2f})  mean_accepted={r['mean_accepted']:.2f}",
-              flush=True)
-        if not r["identical"]:
-            print("   base:", repr(tok.decode(base[max(0, prefix - 5) : prefix + 10])))
-            print("   spec:", repr(tok.decode(spec[max(0, prefix - 5) : prefix + 10])))
-        results.append(r)
+        for nd in [int(x) for x in args.num_draft.split(",")]:
+            stats = {}
+            spec, t_spec = speculative_generate(
+                model, draft, prompt, args.max_tokens, eos, stats, num_draft=nd)
+            prefix = next((k for k, (a, b) in enumerate(zip(base, spec)) if a != b),
+                          min(len(base), len(spec)))
+            acc = stats["accepted"]
+            r = {
+                "q": QUESTIONS[i], "num_draft": nd, "identical": base == spec,
+                "first_diff": prefix, "n_base": len(base), "n_spec": len(spec),
+                "base_tok_s": (len(base) - 1) / t_base,
+                "spec_tok_s": (len(spec) - 1) / t_spec,
+                "mean_accepted": statistics.mean(acc), "rounds": len(acc),
+                "accepted": acc, "base": base, "spec": spec,
+            }
+            print(f"[{i}] nd={nd} identical={r['identical']} first_diff={prefix}/{len(base)} "
+                  f"base {r['base_tok_s']:.1f} tok/s  spec {r['spec_tok_s']:.1f} tok/s "
+                  f"(x{r['spec_tok_s'] / r['base_tok_s']:.2f})  "
+                  f"mean_accepted={r['mean_accepted']:.2f}", flush=True)
+            if not r["identical"]:
+                print("   base:", repr(tok.decode(base[max(0, prefix - 5) : prefix + 10])))
+                print("   spec:", repr(tok.decode(spec[max(0, prefix - 5) : prefix + 10])))
+            results.append(r)
 
 if args.mode == "offline":
   for v in args.variants.split(","):
@@ -119,9 +124,13 @@ if args.mode == "offline":
     print(f"ALL {v}: anchors={len(allacc)} mean_accepted={statistics.mean(allacc):.3f} "
           f"tokens/round={statistics.mean(allacc) + 1:.3f}")
 else:
-    print("ALL: identical", sum(r["identical"] for r in results), "/", len(results),
-          f"base {statistics.mean(r['base_tok_s'] for r in results):.1f} tok/s "
-          f"spec {statistics.mean(r['spec_tok_s'] for r in results):.1f} tok/s "
-          f"mean_accepted {statistics.mean(r['mean_accepted'] for r in results):.2f}")
+  for nd in [int(x) for x in args.num_draft.split(",")]:
+    rs = [r for r in results if r["num_draft"] == nd]
+    base_t = sum(r["n_base"] - 1 for r in rs) / sum((r["n_base"] - 1) / r["base_tok_s"] for r in rs)
+    spec_t = sum(r["n_spec"] - 1 for r in rs) / sum((r["n_spec"] - 1) / r["spec_tok_s"] for r in rs)
+    acc = [a for r in rs for a in r["accepted"]]
+    print(f"ALL nd={nd}: identical {sum(r['identical'] for r in rs)}/{len(rs)}  "
+          f"base {base_t:.1f} tok/s  spec {spec_t:.1f} tok/s (x{spec_t / base_t:.2f})  "
+          f"mean_accepted {statistics.mean(acc):.2f}")
 if args.out:
     Path(args.out).write_text(json.dumps(results))
