@@ -1,0 +1,10 @@
+mlx_lm from /Users/lhm/inkling-orchestra/engine/mlx-lm-base/mlx_lm/__init__.py
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 2712.30it/s]
+ops per decode step (B=1): 13510
+graph build per step (B=1): 11.5 ms
+ctx=short B= 1:  107.4 ms/step     9.3 tok/s total
+ctx=short B= 4:  191.9 ms/step    20.8 tok/s total
+ctx=short B= 8:  258.7 ms/step    30.9 tok/s total
+ctx=4k    B= 1:  122.1 ms/step     8.2 tok/s total
+ctx=4k    B= 4:  232.8 ms/step    17.2 tok/s total
+ctx=4k    B= 8:  307.5 ms/step    26.0 tok/s total
