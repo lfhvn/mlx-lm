@@ -1,0 +1,20 @@
+[gpulock] acquired after 910s, memory free 50%
+passes=1 L=1: 33.3 ms
+passes=1 L=2: 48.5 ms
+passes=1 L=4: 69.2 ms
+passes=1 L=7: 139.8 ms
+passes=2 L=1: 56.6 ms
+passes=2 L=2: 92.0 ms
+passes=2 L=4: 158.2 ms
+passes=2 L=7: 180.7 ms
+passes=3 L=1: 79.9 ms
+passes=3 L=2: 140.3 ms
+passes=3 L=4: 194.7 ms
+passes=3 L=7: 231.0 ms
+prompt 0 len 4038: plain 10.43 tok/s (128 tok)
+  spec dp=1 k=2: 9.30 tok/s (0.89x) acc 1.43/2 tok/round 2.42 exact=False first_diff=35
+  spec dp=1 k=3: 8.69 tok/s (0.83x) acc 1.95/3 tok/round 2.91 exact=False first_diff=35
+  spec dp=1 k=4: 8.68 tok/s (0.83x) acc 2.45/4 tok/round 3.37 exact=False first_diff=35
+  spec dp=2 k=2: 8.67 tok/s (0.83x) acc 1.78/2 tok/round 2.78 exact=False first_diff=35
+  spec dp=2 k=3: 8.66 tok/s (0.83x) acc 2.58/3 tok/round 3.56 exact=False first_diff=35
+  spec dp=2 k=4: 8.56 tok/s (0.82x) acc 3.33/4 tok/round 4.27 exact=False first_diff=35

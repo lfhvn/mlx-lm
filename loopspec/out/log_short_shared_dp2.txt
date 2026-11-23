@@ -1,0 +1,13 @@
+[gpulock] acquired after 861s, memory free 53%
+prompt 0 len 34: plain 10.53 tok/s (128 tok)
+  shared dp=2 k=2: 10.69 tok/s (1.02x) acc 1.74/2 tok/round 2.72 exact=False first_diff=92
+  shared dp=2 k=3: 11.15 tok/s (1.06x) acc 2.66/3 tok/round 3.66 exact=False first_diff=92
+  shared dp=2 k=4: 10.59 tok/s (1.01x) acc 3.48/4 tok/round 4.41 exact=False first_diff=92
+prompt 1 len 38: plain 10.17 tok/s (128 tok)
+  shared dp=2 k=2: 11.56 tok/s (1.14x) acc 1.91/2 tok/round 2.91 exact=False first_diff=81
+  shared dp=2 k=3: 10.85 tok/s (1.07x) acc 2.56/3 tok/round 3.56 exact=False first_diff=81
+  shared dp=2 k=4: 11.03 tok/s (1.09x) acc 3.41/4 tok/round 4.41 exact=False first_diff=81
+prompt 2 len 37: plain 10.62 tok/s (128 tok)
+  shared dp=2 k=2: 11.22 tok/s (1.06x) acc 1.89/2 tok/round 2.84 exact=True first_diff=None
+  shared dp=2 k=3: 11.45 tok/s (1.08x) acc 2.76/3 tok/round 3.76 exact=True first_diff=None
+  shared dp=2 k=4: 11.30 tok/s (1.06x) acc 3.61/4 tok/round 4.57 exact=True first_diff=None

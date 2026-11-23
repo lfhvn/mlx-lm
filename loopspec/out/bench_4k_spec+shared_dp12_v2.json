@@ -1,0 +1,115 @@
+{
+ "ctx": "4k",
+ "runs": [
+  {
+   "prompt": 0,
+   "mode": "plain",
+   "tps": 8.922303187555409,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "spec",
+   "dp": 1,
+   "k": 2,
+   "tps": 7.80349233125722,
+   "mean_accept": 1.4339622641509433,
+   "rounds": 53,
+   "tok_per_round": 2.4150943396226414,
+   "exact": false,
+   "first_diff": 35,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "spec",
+   "dp": 1,
+   "k": 3,
+   "tps": 7.762471279512089,
+   "mean_accept": 1.9545454545454546,
+   "rounds": 44,
+   "tok_per_round": 2.909090909090909,
+   "exact": false,
+   "first_diff": 35,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "shared",
+   "dp": 1,
+   "k": 2,
+   "tps": 10.223059873769236,
+   "mean_accept": 1.7083333333333333,
+   "rounds": 48,
+   "tok_per_round": 2.6666666666666665,
+   "exact": false,
+   "first_diff": 60,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "shared",
+   "dp": 1,
+   "k": 3,
+   "tps": 10.078771219211196,
+   "mean_accept": 2.4594594594594597,
+   "rounds": 37,
+   "tok_per_round": 3.4594594594594597,
+   "exact": false,
+   "first_diff": 60,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "spec",
+   "dp": 2,
+   "k": 2,
+   "tps": 7.383972919886925,
+   "mean_accept": 1.7826086956521738,
+   "rounds": 46,
+   "tok_per_round": 2.782608695652174,
+   "exact": false,
+   "first_diff": 35,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "spec",
+   "dp": 2,
+   "k": 3,
+   "tps": 7.2949974808095615,
+   "mean_accept": 2.5833333333333335,
+   "rounds": 36,
+   "tok_per_round": 3.5555555555555554,
+   "exact": false,
+   "first_diff": 35,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "shared",
+   "dp": 2,
+   "k": 2,
+   "tps": 9.313781272404382,
+   "mean_accept": 1.8888888888888888,
+   "rounds": 45,
+   "tok_per_round": 2.8444444444444446,
+   "exact": false,
+   "first_diff": 60,
+   "n": 128
+  },
+  {
+   "prompt": 0,
+   "mode": "shared",
+   "dp": 2,
+   "k": 3,
+   "tps": 9.804286316259516,
+   "mean_accept": 2.8529411764705883,
+   "rounds": 34,
+   "tok_per_round": 3.764705882352941,
+   "exact": false,
+   "first_diff": 60,
+   "n": 128
+  }
+ ]
+}

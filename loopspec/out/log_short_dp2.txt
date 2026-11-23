@@ -1,0 +1,19 @@
+[gpulock] acquired after 1293s, memory free 55%
+prompt 0 len 34: plain 9.88 tok/s (128 tok)
+  spec dp=2 k=2: 9.23 tok/s (0.93x) acc 1.77/2 tok/round 2.72 exact=False first_diff=54
+  spec dp=2 k=3: 9.31 tok/s (0.94x) acc 2.64/3 tok/round 3.56 exact=False first_diff=54
+  spec dp=2 k=4: 9.19 tok/s (0.93x) acc 3.55/4 tok/round 4.41 exact=False first_diff=54
+  spec dp=2 k=5: 7.26 tok/s (0.73x) acc 3.43/5 tok/round 4.27 exact=False first_diff=119
+  spec dp=2 k=6: 7.01 tok/s (0.71x) acc 4.15/6 tok/round 4.92 exact=False first_diff=119
+prompt 1 len 38: plain 8.51 tok/s (128 tok)
+  spec dp=2 k=2: 10.06 tok/s (1.18x) acc 1.98/2 tok/round 2.98 exact=False first_diff=80
+  spec dp=2 k=3: 10.18 tok/s (1.20x) acc 2.91/3 tok/round 3.88 exact=False first_diff=80
+  spec dp=2 k=4: 9.62 tok/s (1.13x) acc 3.81/4 tok/round 4.74 exact=False first_diff=80
+  spec dp=2 k=5: 9.71 tok/s (1.14x) acc 4.70/5 tok/round 5.57 exact=False first_diff=80
+  spec dp=2 k=6: 9.87 tok/s (1.16x) acc 5.60/6 tok/round 6.40 exact=False first_diff=80
+prompt 2 len 37: plain 10.11 tok/s (128 tok)
+  spec dp=2 k=2: 9.66 tok/s (0.96x) acc 1.84/2 tok/round 2.84 exact=False first_diff=72
+  spec dp=2 k=3: 9.89 tok/s (0.98x) acc 2.76/3 tok/round 3.76 exact=False first_diff=72
+  spec dp=2 k=4: 9.69 tok/s (0.96x) acc 3.57/4 tok/round 4.57 exact=False first_diff=72
+  spec dp=2 k=5: 8.53 tok/s (0.84x) acc 3.85/5 tok/round 4.74 exact=False first_diff=38
+  spec dp=2 k=6: 8.61 tok/s (0.85x) acc 4.70/6 tok/round 5.57 exact=False first_diff=38

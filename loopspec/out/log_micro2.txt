@@ -1,0 +1,37 @@
+[gpulock] acquired after 955s, memory free 52%
+ctx=short passes=1 rows=0 L=1: 57.2 ms
+ctx=short passes=1 rows=0 L=2: 53.9 ms
+ctx=short passes=1 rows=0 L=4: 76.5 ms
+ctx=short passes=1 rows=0 L=7: 96.7 ms
+ctx=short passes=1 rows=8 L=1: 40.5 ms
+ctx=short passes=1 rows=8 L=2: 54.9 ms
+ctx=short passes=1 rows=8 L=4: 82.2 ms
+ctx=short passes=1 rows=8 L=7: 119.0 ms
+ctx=short passes=1 L=7 kernel vs rows: max logit diff 0.937, same argmax True
+ctx=short passes=3 rows=0 L=1: 76.8 ms
+ctx=short passes=3 rows=0 L=2: 102.7 ms
+ctx=short passes=3 rows=0 L=4: 160.8 ms
+ctx=short passes=3 rows=0 L=7: 197.6 ms
+ctx=short passes=3 rows=8 L=1: 90.7 ms
+ctx=short passes=3 rows=8 L=2: 123.8 ms
+ctx=short passes=3 rows=8 L=4: 168.5 ms
+ctx=short passes=3 rows=8 L=7: 240.3 ms
+ctx=short passes=3 L=7 kernel vs rows: max logit diff 6.434, same argmax True
+ctx=4k passes=1 rows=0 L=1: 34.2 ms
+ctx=4k passes=1 rows=0 L=2: 53.2 ms
+ctx=4k passes=1 rows=0 L=4: 74.9 ms
+ctx=4k passes=1 rows=0 L=7: 139.8 ms
+ctx=4k passes=1 rows=8 L=1: 50.0 ms
+ctx=4k passes=1 rows=8 L=2: 63.8 ms
+ctx=4k passes=1 rows=8 L=4: 104.5 ms
+ctx=4k passes=1 rows=8 L=7: 148.7 ms
+ctx=4k passes=1 L=7 kernel vs rows: max logit diff 5.472, same argmax False
+ctx=4k passes=3 rows=0 L=1: 84.8 ms
+ctx=4k passes=3 rows=0 L=2: 170.5 ms
+ctx=4k passes=3 rows=0 L=4: 207.9 ms
+ctx=4k passes=3 rows=0 L=7: 248.2 ms
+ctx=4k passes=3 rows=8 L=1: 102.5 ms
+ctx=4k passes=3 rows=8 L=2: 141.8 ms
+ctx=4k passes=3 rows=8 L=4: 213.7 ms
+ctx=4k passes=3 rows=8 L=7: 306.5 ms
+ctx=4k passes=3 L=7 kernel vs rows: max logit diff 1.692, same argmax True

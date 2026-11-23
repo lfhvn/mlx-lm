@@ -1,0 +1,7 @@
+[gpulock] acquired after 1478s, memory free 51%
+dp=1: target max diff 0.0, draft max diff 0.0
+dp=2: target max diff 0.0, draft max diff 0.0
+shared dp=1: 11.67 tok/s acc 2.35 first_diff 30
+'<|message_model|><|content_thinking|>The user wants a Python function returning longest palindromic substring of s, plus complexity explanation. Need provide code and explanation. Need think through content. We can give expand-around-center solution O(n^2) time O(1) space (excluding output). Maybe mention DP alternative O'
+shared dp=2: 9.91 tok/s acc 2.53 first_diff None
+'<|message_model|><|content_thinking|>The user wants a Python function returning longest palindromic substring of s, plus complexity explanation. Need provide code and explanation. Need think through correctness. We can give expand-around-center O(n^2) time O(1) extra (excluding output). Maybe mention DP O('

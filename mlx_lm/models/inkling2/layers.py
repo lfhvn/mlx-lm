@@ -680,6 +680,9 @@ class DecoderLayer(nn.Module):
 
         if conv is not None:
             n = self.post_mlp_convolution.kernel_size - 1
+            if getattr(conv, "keep_windows", False):
+                # Speculative decoding rolls the state back with these.
+                conv.windows = conv_states
             for i, window in enumerate(conv_states):
                 conv[i] = _conv_state(window, conv.lengths, n)
             conv.advance(block_residual.shape[1])
