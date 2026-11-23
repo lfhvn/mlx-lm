@@ -114,6 +114,11 @@ def _weighted_sum(states: mx.array, weights: mx.array) -> mx.array:
     return out.astype(states.dtype)
 
 
+@partial(mx.compile, shapeless=True)
+def _dynamic_taps(windows: mx.array, static: mx.array, dynamic: mx.array) -> mx.array:
+    return windows.astype(mx.float32) * (static + dynamic.astype(mx.float32))
+
+
 class _Fused:
     """A weight made from the weights of some linear layers, kept out of the
     module parameters. It is made again if a source weight changes."""
@@ -222,6 +227,8 @@ class DynamicShortConvolution(nn.Module):
         self.num_heads = num_heads
         self.static_weight = mx.zeros((kernel_size, dims))
         self.weight_proj = nn.Linear(input_dims, num_heads * kernel_size, bias=False)
+        # The static weight in the layout of the taps, made once.
+        self._static = (None, None)
 
     def __call__(
         self,
@@ -232,19 +239,20 @@ class DynamicShortConvolution(nn.Module):
     ) -> tuple[mx.array, mx.array]:
         B, L, C = hidden_states.shape
         K, H = self.kernel_size, self.num_heads
-        dynamic_weights = self.weight_proj(dynamic_input).astype(mx.float32)
-        dynamic_weights = dynamic_weights.reshape(B, L, H, 1, K)
-        static_weights = self.static_weight.astype(mx.float32).T.reshape(H, -1, K)
-        weights = static_weights + dynamic_weights
+        dynamic_weights = self.weight_proj(dynamic_input).reshape(B, L, H, 1, K)
+        if self._static[0] is not self.static_weight:
+            static = self.static_weight.astype(mx.float32).T.reshape(H, -1, K)
+            self._static = (self.static_weight, static)
+        static_weights = self._static[1]
 
         window = _conv_input(hidden_states, conv_state, conv_mask, K)
         windows = mx.stack(
             [window[:, K - 1 - lag : K - 1 - lag + L] for lag in range(K)], axis=-1
         )
         windows = windows.reshape(B, L, H, -1, K)
-        out = (windows * weights).sum(axis=-1).reshape(B, L, C)
-        out = (out + hidden_states.astype(mx.float32)) / math.sqrt(2 * K + 1)
-        return out.astype(hidden_states.dtype), window
+        out = _dynamic_taps(windows, static_weights, dynamic_weights)
+        out = out.sum(axis=-1).reshape(B, L, C)
+        return _conv_residual(out, hidden_states, math.sqrt(2 * K + 1)), window
 
 
 _ARANGES: dict = {}

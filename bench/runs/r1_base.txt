@@ -1,0 +1,3 @@
+[gpulock] acquired after 649s, memory free 56%
+mlx_lm from /Users/lhm/inkling-orchestra/engine/mlx-lm-base/mlx_lm/__init__.py
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 1682.63it/s]
