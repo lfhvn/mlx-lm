@@ -123,8 +123,14 @@ class _Fused:
         if len(sources) != len(self.sources) or any(
             a is not b for a, b in zip(sources, self.sources)
         ):
-            self.sources = sources
             self.weight = mx.concatenate(sources)
+            # The layers use views of the fused weight, so it takes no memory.
+            start = 0
+            for l in linears:
+                n = l.weight.shape[0]
+                l.weight = self.weight[start : start + n]
+                start += n
+            self.sources = tuple(l.weight for l in linears)
         return self.weight
 
 
@@ -347,6 +353,28 @@ class Attention(nn.Module):
             self.num_heads, args.d_rel, args.rel_l2_clip_threshold
         )
         self.eps = args.rms_norm_eps
+        self._fused = _Fused()
+
+    def _project(self, hidden_states, key_hidden_states, value_hidden_states):
+        """Returns the q, k, v, r, gate and sink projections. One matmul makes
+        the projections that take the same input."""
+        names = ["q_proj", "r_proj", "gate_proj", "sink_proj", "k_proj", "v_proj"]
+        shared = key_hidden_states is value_hidden_states is hidden_states
+        weight = self._fused(tuple(getattr(self, n) for n in names))
+        # A larger matmul can change the roundings of prefill, so decode only.
+        if weight is None or hidden_states.shape[1] != 1:
+            out = {n: getattr(self, n)(hidden_states) for n in names[:4]}
+        else:
+            if not shared:
+                weight = weight[: sum(getattr(self, n).weight.shape[0] for n in names[:4])]
+            fused = hidden_states @ weight.T
+            sizes = [getattr(self, n).weight.shape[0] for n in names[: 6 if shared else 4]]
+            splits = [sum(sizes[: i + 1]) for i in range(len(sizes) - 1)]
+            out = dict(zip(names, mx.split(fused, splits, axis=-1)))
+        if "k_proj" not in out:
+            out["k_proj"] = self.k_proj(key_hidden_states)
+            out["v_proj"] = self.v_proj(value_hidden_states)
+        return [out[n] for n in ("q_proj", "k_proj", "v_proj", "r_proj", "gate_proj", "sink_proj")]
 
     def _attend(
         self,
@@ -355,12 +383,12 @@ class Attention(nn.Module):
         key_states: mx.array,
         value_states: mx.array,
         relative_states: mx.array,
+        gate: mx.array,
+        sinks: mx.array,
         cache: Any | None,
         tau: mx.array | None = None,
     ) -> mx.array:
         B, L, _ = hidden_states.shape
-        gate = self.gate_proj(hidden_states)
-        sinks = self.sink_proj(hidden_states)
 
         query_states = query_states.reshape(B, L, self.num_heads, -1)
         key_states = key_states.reshape(B, L, self.num_key_value_heads, -1)
@@ -465,19 +493,13 @@ class SlidingAttention(Attention):
         conv_mask: mx.array | None,
     ) -> mx.array:
         kv_cache = cache[0] if cache is not None else None
-        key_states, conv_states[0] = self.k_sconv(
-            self.k_proj(key_hidden_states), conv_states[0], conv_mask
+        q, k, v, r, gate, sinks = self._project(
+            hidden_states, key_hidden_states, value_hidden_states
         )
-        value_states, conv_states[1] = self.v_sconv(
-            self.v_proj(value_hidden_states), conv_states[1], conv_mask
-        )
+        key_states, conv_states[0] = self.k_sconv(k, conv_states[0], conv_mask)
+        value_states, conv_states[1] = self.v_sconv(v, conv_states[1], conv_mask)
         return self._attend(
-            hidden_states,
-            self.q_proj(hidden_states),
-            key_states,
-            value_states,
-            self.r_proj(hidden_states),
-            kv_cache,
+            hidden_states, q, key_states, value_states, r, gate, sinks, kv_cache
         )
 
 
@@ -502,14 +524,17 @@ class FullAttention(Attention):
         conv_mask: mx.array | None,
     ) -> mx.array:
         kv_cache = cache[0] if cache is not None else None
+        q, k, v, r, gate, sinks = self._project(
+            hidden_states, key_hidden_states, value_hidden_states
+        )
         key_states, conv_states[0] = self.k_sconv(
-            self.k_proj(key_hidden_states),
+            k,
             key_hidden_states,
             conv_states[0],
             conv_mask,
         )
         value_states, conv_states[1] = self.v_sconv(
-            self.v_proj(value_hidden_states),
+            v,
             value_hidden_states,
             conv_states[1],
             conv_mask,
@@ -522,10 +547,12 @@ class FullAttention(Attention):
         )
         return self._attend(
             hidden_states,
-            self.q_proj(hidden_states),
+            q,
             key_states,
             value_states,
-            self.r_proj(hidden_states),
+            r,
+            gate,
+            sinks,
             kv_cache,
             tau=tau[..., None, None],
         )
@@ -663,7 +690,7 @@ class MessageGate(nn.Module):
         states = self.down_proj(states.astype(self.down_proj.weight.dtype))
         states = states.astype(mx.float32)
         weight = self._gates((self.forget_gate_proj, self.message_gate_proj))
-        if weight is None:
+        if weight is None or states.shape[1] != 1:
             forget = self.forget_gate_proj(states)
             gate = self.message_gate_proj(states)
         else:
