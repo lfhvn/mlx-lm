@@ -109,6 +109,25 @@ def _weighted_sum(states: mx.array, weights: mx.array) -> mx.array:
     return out.astype(states.dtype)
 
 
+class _Fused:
+    """A weight made from the weights of some linear layers, kept out of the
+    module parameters. It is made again if a source weight changes."""
+
+    def __init__(self):
+        self.sources, self.weight = (), None
+
+    def __call__(self, linears) -> mx.array | None:
+        if not all(type(l) is nn.Linear and "bias" not in l for l in linears):
+            return None
+        sources = tuple(l.weight for l in linears)
+        if len(sources) != len(self.sources) or any(
+            a is not b for a, b in zip(sources, self.sources)
+        ):
+            self.sources = sources
+            self.weight = mx.concatenate(sources)
+        return self.weight
+
+
 class L2Clip(nn.Module):
     def __init__(self, threshold: float):
         super().__init__()
@@ -349,9 +368,8 @@ class Attention(nn.Module):
         relative_states = relative_states.reshape(B, L, self.num_heads, -1)
         query_states = self.q_l2_clip(query_states, tau)
         key_states = self.k_l2_clip(key_states)
-        value_states = unweighted_rms_norm(
-            value_states.astype(mx.float32), self.eps
-        ).astype(value_states.dtype)
+        # The norm computes in float32 for any input dtype.
+        value_states = unweighted_rms_norm(value_states, self.eps)
         relative_states = self.rel_l2_clip(relative_states, tau)
         position_bias = self.rel_logits_proj(relative_states)
 
@@ -635,6 +653,7 @@ class MessageGate(nn.Module):
         self.down_proj = nn.Linear(2 * dims, rank, bias=False)
         self.forget_gate_proj = nn.Linear(rank, dims, bias=False)
         self.message_gate_proj = nn.Linear(rank, dims, bias=False)
+        self._gates = _Fused()
 
     def __call__(self, hidden_states: mx.array, message: mx.array) -> mx.array:
         states = mx.concatenate(
@@ -643,12 +662,13 @@ class MessageGate(nn.Module):
         )
         states = self.down_proj(states.astype(self.down_proj.weight.dtype))
         states = states.astype(mx.float32)
-        return _message_mix(
-            hidden_states,
-            message,
-            self.forget_gate_proj(states),
-            self.message_gate_proj(states),
-        )
+        weight = self._gates((self.forget_gate_proj, self.message_gate_proj))
+        if weight is None:
+            forget = self.forget_gate_proj(states)
+            gate = self.message_gate_proj(states)
+        else:
+            forget, gate = mx.split(states @ weight.T, 2, axis=-1)
+        return _message_mix(hidden_states, message, forget, gate)
 
 
 class MessageInput(nn.Module):

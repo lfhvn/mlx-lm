@@ -17,9 +17,11 @@ cfg.pop("vision_config", None)
 args = inkling2.ModelArgs.from_dict(cfg)
 mx.random.seed(0)
 model = inkling2.Model(args)
-model.update(nn.utils.tree_map(lambda p: (mx.random.normal(p.shape) * 0.05).astype(mx.bfloat16)
-                               if p.dtype == mx.bfloat16 or p.dtype == mx.float32 else p,
-                               model.parameters()))
+from mlx.utils import tree_flatten, tree_unflatten
+cast = model.cast_predicate
+model.update(tree_unflatten([
+    (k, (mx.random.normal(p.shape) * 0.05).astype(mx.bfloat16 if cast(k) else mx.float32))
+    for k, p in tree_flatten(model.parameters())]))
 nn.quantize(model, group_size=16, bits=4, mode="nvfp4",
             class_predicate=lambda p, m: ".experts." in p and hasattr(m, "to_quantized"))
 mx.eval(model.parameters())
