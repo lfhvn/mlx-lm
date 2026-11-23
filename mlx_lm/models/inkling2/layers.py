@@ -417,7 +417,8 @@ class Attention(nn.Module):
                 key_start=key_start,
             )
 
-        if L == 1 and _use_kernels():
+        # The decode kernel splits each head over 32 lanes.
+        if L == 1 and _use_kernels() and query.shape[-1] % 32 == 0:
             # One kernel for all rows. It gets the key positions from the cache
             # and makes no temporaries that grow with S.
             rotation = 0
